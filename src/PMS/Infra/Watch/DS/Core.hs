@@ -142,25 +142,25 @@ echoTask resQ cmdDat val = flip E.catchAny errHdl $ do
 --
 genToolsListWatchTask :: DM.ToolsListWatchCommandData -> AppContext (IOTask ())
 genToolsListWatchTask dat = do
-  scriptsDir <- view DM.scriptsDirDomainData <$> lift ask
+  toolsDir <- view DM.toolsDirDomainData <$> lift ask
   notiQ <- view DM.notificationQueueDomainData <$> lift ask
   mgrVar <- view watchManagerAppData <$> ask
   mgr <- liftIOE $ STM.atomically $ STM.readTMVar mgrVar
-  let toolsJ = scriptsDir </> DM._TOOLS_LIST_FILE
+  let toolsJ = toolsDir </> DM._TOOLS_LIST_FILE
 
-  $logDebugS DM._LOGTAG $ T.pack $ "toolsListWatchTask: directory " ++ scriptsDir
+  $logDebugS DM._LOGTAG $ T.pack $ "toolsListWatchTask: directory " ++ toolsDir
   $logDebugS DM._LOGTAG $ T.pack $ "toolsListWatchTask: file " ++ toolsJ
  
-  return $ toolsListWatchTask notiQ dat mgr scriptsDir
+  return $ toolsListWatchTask notiQ dat mgr toolsDir
 
 
 -- |
 --   
 toolsListWatchTask :: STM.TQueue DM.McpNotification -> DM.ToolsListWatchCommandData -> S.WatchManager -> String -> IOTask ()
-toolsListWatchTask notiQ _ mgr scriptsDir = flip E.catchAny errHdl $ do
+toolsListWatchTask notiQ _ mgr toolsDir = flip E.catchAny errHdl $ do
   hPutStrLn stderr $ "[INFO] PMS.Infra.Watch.DS.Core.work.toolsListWatchTask run. "
 
-  _stop <- S.watchTree mgr scriptsDir isToolsListJson onToolsListUpdated
+  _stop <- S.watchTree mgr toolsDir isToolsListJson onToolsListUpdated
 
   hPutStrLn stderr "[INFO] PMS.Infra.Watch.DS.Core.toolsListWatchTask end."
 
