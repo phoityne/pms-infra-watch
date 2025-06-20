@@ -9,7 +9,7 @@
 ---
 
 ## Package Structure
-![Package Structure](https://raw.githubusercontent.com/phoityne/pms-infra-watch/main/docs/01_package_structuer.png)
+![Package Structure](https://raw.githubusercontent.com/phoityne/pms-infra-watch/main/docs/01_package_structure.png)
 ---
 
 ## Module Structure
