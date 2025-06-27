@@ -85,19 +85,18 @@ run = do
         let domDat = ctx^.domainDataSpecContext
             appDat = ctx^.appDataSpecContext
             cmdQ   = domDat^.DM.watchQueueDomainData
-            resQ   = domDat^.DM.responseQueueDomainData
+            notiQ   = domDat^.DM.notificationQueueDomainData
             expect = "abc"
-            jsonR  = def {DM._jsonrpcJsonRpcRequest = expect}
-            argDat = DM.EchoWatchCommandData jsonR ""
+            argDat = DM.EchoWatchCommandData def expect
             args   = DM.EchoWatchCommand argDat
             
         thId <- async $ SUT.runWithAppData appDat domDat
 
         STM.atomically $ STM.writeTQueue cmdQ args
 
-        (DM.McpToolsCallResponse dat) <- STM.atomically $ STM.readTQueue resQ
+        (DM.McpToolsListChangedNotification dat) <- STM.atomically $ STM.readTQueue notiQ
 
-        let actual = dat^.DM.jsonrpcMcpToolsCallResponseData^.DM.jsonrpcJsonRpcRequest
+        let actual = dat^.DM.methodMcpToolsListChangedNotificationData
         actual `shouldBe` expect
 
         cancel thId

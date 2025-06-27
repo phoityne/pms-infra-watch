@@ -16,12 +16,10 @@ import qualified Data.Text as T
 import Control.Monad.Except
 import System.FilePath
 import qualified Control.Exception.Safe as E
-import System.Exit
 import qualified System.FSNotify as S
 import qualified Data.Text.IO as T
 import qualified Data.Text.Encoding as TE
 import qualified Data.ByteString.Lazy as BL
-
 
 
 import qualified PMS.Domain.Model.DM.Type as DM
@@ -72,6 +70,7 @@ cmd2task = await >>= \case
     go :: DM.WatchCommand -> AppContext (IOTask ())
     go (DM.EchoWatchCommand dat) = genEchoTask dat
     go (DM.ToolsListWatchCommand dat) = genToolsListWatchTask dat
+    go (DM.PromptsListWatchCommand dat) = genPromptsListWatchTask dat
 
 ---------------------------------------------------------------------------------
 -- |
@@ -92,9 +91,9 @@ sink = await >>= \case
 
     go :: (IO ()) -> AppContext ()
     go task = do
-      $logDebugS DM._LOGTAG "sink: start async."
+      $logDebugS DM._LOGTAG "sink: start task."
       liftIOE task
-      $logDebugS DM._LOGTAG "sink: end async."
+      $logDebugS DM._LOGTAG "sink: end task."
       return ()
 
 ---------------------------------------------------------------------------------
@@ -102,42 +101,30 @@ sink = await >>= \case
 --
 genEchoTask :: DM.EchoWatchCommandData -> AppContext (IOTask ())
 genEchoTask dat = do
-  resQ <- view DM.responseQueueDomainData <$> lift ask
+  notiQ <- view DM.notificationQueueDomainData <$> lift ask
   let val = dat^.DM.valueEchoWatchCommandData
 
   $logDebugS DM._LOGTAG $ T.pack $ "echoTask: echo : " ++ val
-  return $ echoTask resQ dat val
+  return $ echoTask notiQ dat val
 
 
 -- |
---   
-echoTask :: STM.TQueue DM.McpResponse -> DM.EchoWatchCommandData -> String -> IOTask ()
-echoTask resQ cmdDat val = flip E.catchAny errHdl $ do
+--
+echoTask :: STM.TQueue DM.McpNotification -> DM.EchoWatchCommandData -> String -> IOTask ()
+echoTask notiQ _ val = flip E.catchAny errHdl $ do
   hPutStrLn stderr $ "[INFO] PMS.Infra.Watch.DS.Core.echoTask run. " ++ val
 
-  response ExitSuccess val ""
+  let dat = def {DM._methodMcpToolsListChangedNotificationData = val}
+      res = DM.McpToolsListChangedNotification dat
+
+  STM.atomically $ STM.writeTQueue notiQ res
 
   hPutStrLn stderr "[INFO] PMS.Infra.Watch.DS.Core.echoTask end."
 
   where
     errHdl :: E.SomeException -> IO ()
-    errHdl e = response (ExitFailure 1) "" (show e)
-
-    response :: ExitCode -> String -> String -> IO ()
-    response code outStr errStr = do
-      let jsonRpc = cmdDat^.DM.jsonrpcEchoWatchCommandData
-          content = [ DM.McpToolsCallResponseResultContent "text" outStr
-                    , DM.McpToolsCallResponseResultContent "text" errStr
-                    ]
-          result = DM.McpToolsCallResponseResult {
-                      DM._contentMcpToolsCallResponseResult = content
-                    , DM._isErrorMcpToolsCallResponseResult = (ExitSuccess /= code)
-                    }
-          resDat = DM.McpToolsCallResponseData jsonRpc result
-          res = DM.McpToolsCallResponse resDat
-
-      STM.atomically $ STM.writeTQueue resQ res
-
+    errHdl e = hPutStrLn stderr $ "[INFO] PMS.Infra.Watch.DS.Core.echoTask.errHdl " ++ show e
+    
 -- |
 --
 genToolsListWatchTask :: DM.ToolsListWatchCommandData -> AppContext (IOTask ())
@@ -185,9 +172,68 @@ toolsListWatchTask notiQ _ mgr toolsDir = flip E.catchAny errHdl $ do
       hPutStrLn stderr $ "[INFO] PMS.Infra.Watch.DS.Core.toolsListWatchTask.response called. " ++ toolFile
       tools <- readToolsList toolFile
 
-      let params = def {DM._toolsMcpToolListChangedNotificationDataParams = DM.RawJsonByteString tools}
-          dat = def {DM._paramsMcpToolListChangedNotificationData = params}
-          res = DM.McpToolListChangedNotification dat
+      let params = def {DM._toolsMcpToolsListChangedNotificationDataParams = DM.RawJsonByteString tools}
+          dat = def {DM._paramsMcpToolsListChangedNotificationData = params}
+          res = DM.McpToolsListChangedNotification dat
+
+      STM.atomically $ STM.writeTQueue notiQ res
+
+
+-- |
+--
+genPromptsListWatchTask :: DM.PromptsListWatchCommandData -> AppContext (IOTask ())
+genPromptsListWatchTask dat = do
+  promptsDir <- view DM.promptsDirDomainData <$> lift ask
+  notiQ <- view DM.notificationQueueDomainData <$> lift ask
+  mgrVar <- view watchManagerAppData <$> ask
+  mgr <- liftIOE $ STM.atomically $ STM.readTMVar mgrVar
+  let promptsJ = promptsDir </> DM._PROMPTS_LIST_FILE
+
+  $logDebugS DM._LOGTAG $ T.pack $ "promptsListWatchTask: directory " ++ promptsDir
+  $logDebugS DM._LOGTAG $ T.pack $ "promptsListWatchTask: file " ++ promptsJ
+
+  return $ promptsListWatchTask notiQ dat mgr promptsDir
+
+
+-- |
+--
+promptsListWatchTask :: STM.TQueue DM.McpNotification -> DM.PromptsListWatchCommandData -> S.WatchManager -> String -> IOTask ()
+promptsListWatchTask notiQ _ mgr promptsDir = flip E.catchAny errHdl $ do
+  hPutStrLn stderr $ "[INFO] PMS.Infra.Watch.DS.Core.work.promptsListWatchTask run. "
+
+  _stop <- S.watchTree mgr promptsDir isTargetFile onPromptsListUpdated
+
+  hPutStrLn stderr "[INFO] PMS.Infra.Watch.DS.Core.promptsListWatchTask end."
+
+  where
+    errHdl :: E.SomeException -> IO ()
+    errHdl e = hPutStrLn stderr $ "[ERROR] PMS.Infra.Watch.DS.Core.promptsListWatchTask exception occurred. " ++ show e
+
+    isTargetFile :: S.Event -> Bool
+    isTargetFile e =
+      let file = takeFileName (S.eventPath e)
+          ext  = takeExtension file
+      in file == DM._PROMPTS_LIST_FILE || ext `elem` [".md", ".txt", ".prompt"]
+
+    onPromptsListUpdated :: S.Event -> IO ()
+    onPromptsListUpdated e@S.CloseWrite{} = response $ S.eventPath e
+    onPromptsListUpdated e = hPutStrLn stderr $ "[INFO] PMS.Infra.Watch.DS.Core.promptsListWatchTask ignore event: " ++ show e
+
+    readPromptsList :: FilePath -> IO BL.ByteString
+    readPromptsList path = do
+      cont <- T.readFile path
+      return $ BL.fromStrict $ TE.encodeUtf8 cont
+
+    response :: String -> IO ()
+    response updateFile = do
+      hPutStrLn stderr $ "[INFO] PMS.Infra.Watch.DS.Core.promptsListWatchTask.response called. " ++ updateFile
+
+      let promptsFile = promptsDir </> DM._PROMPTS_LIST_FILE
+      prompts <- readPromptsList promptsFile
+
+      let params = def {DM._promptsMcpPromptsListChangedNotificationDataParams = DM.RawJsonByteString prompts}
+          dat = def {DM._paramsMcpPromptsListChangedNotificationData = params}
+          res = DM.McpPromptsListChangedNotification dat
 
       STM.atomically $ STM.writeTQueue notiQ res
 
