@@ -1,5 +1,6 @@
 {-# LANGUAGE TemplateHaskell #-}
 {-# LANGUAGE OverloadedStrings #-}
+{-# LANGUAGE CPP #-}
 
 module PMS.Infra.Watch.DS.Core where
 
@@ -159,7 +160,11 @@ toolsListWatchTask notiQ _ mgr toolsDir = flip E.catchAny errHdl $ do
     isToolsListJson e = takeFileName (S.eventPath e) == DM._TOOLS_LIST_FILE
 
     onToolsListUpdated :: S.Event -> IO ()
+#ifdef mingw32_HOST_OS
+    onToolsListUpdated e@S.Modified{} = response $ S.eventPath e
+#else
     onToolsListUpdated e@S.CloseWrite{} = response $ S.eventPath e
+#endif
     onToolsListUpdated e = hPutStrLn stderr $ "[INFO] PMS.Infra.Watch.DS.Core.toolsListWatchTask ignore event: " ++ show e
 
     readToolsList :: FilePath -> IO BL.ByteString
