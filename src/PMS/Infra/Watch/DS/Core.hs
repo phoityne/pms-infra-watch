@@ -72,6 +72,7 @@ cmd2task = await >>= \case
     go (DM.EchoWatchCommand dat) = genEchoTask dat
     go (DM.ToolsListWatchCommand dat) = genToolsListWatchTask dat
     go (DM.PromptsListWatchCommand dat) = genPromptsListWatchTask dat
+    go (DM.ResourcesListWatchCommand dat) = genResourcesListWatchTask dat
 
 ---------------------------------------------------------------------------------
 -- |
@@ -221,7 +222,11 @@ promptsListWatchTask notiQ _ mgr promptsDir = flip E.catchAny errHdl $ do
       in file == DM._PROMPTS_LIST_FILE || ext `elem` [".md", ".txt", ".prompt"]
 
     onPromptsListUpdated :: S.Event -> IO ()
+#ifdef mingw32_HOST_OS
+    onPromptsListUpdated e@S.Modified{} = response $ S.eventPath e
+#else
     onPromptsListUpdated e@S.CloseWrite{} = response $ S.eventPath e
+#endif
     onPromptsListUpdated e = hPutStrLn stderr $ "[INFO] PMS.Infra.Watch.DS.Core.promptsListWatchTask ignore event: " ++ show e
 
     readPromptsList :: FilePath -> IO BL.ByteString
@@ -242,3 +247,66 @@ promptsListWatchTask notiQ _ mgr promptsDir = flip E.catchAny errHdl $ do
 
       STM.atomically $ STM.writeTQueue notiQ res
 
+
+
+-- |
+--
+genResourcesListWatchTask :: DM.ResourcesListWatchCommandData -> AppContext (IOTask ())
+genResourcesListWatchTask dat = do
+  resourcesDir <- view DM.resourcesDirDomainData <$> lift ask
+  notiQ <- view DM.notificationQueueDomainData <$> lift ask
+  mgrVar <- view watchManagerAppData <$> ask
+  mgr <- liftIOE $ STM.atomically $ STM.readTMVar mgrVar
+  let resourcesJ = resourcesDir </> DM._RESOURCES_LIST_FILE
+
+  $logDebugS DM._LOGTAG $ T.pack $ "resourcesListWatchTask: directory " ++ resourcesDir
+  $logDebugS DM._LOGTAG $ T.pack $ "resourcesListWatchTask: file " ++ resourcesJ
+
+  return $ resourcesListWatchTask notiQ dat mgr resourcesDir
+
+
+-- |
+--
+resourcesListWatchTask :: STM.TQueue DM.McpNotification -> DM.ResourcesListWatchCommandData -> S.WatchManager -> String -> IOTask ()
+resourcesListWatchTask notiQ _ mgr resourcesDir = flip E.catchAny errHdl $ do
+  hPutStrLn stderr $ "[INFO] PMS.Infra.Watch.DS.Core.work.resourcesListWatchTask run. "
+
+  _stop <- S.watchTree mgr resourcesDir isTargetFile onResourcesListUpdated
+
+  hPutStrLn stderr "[INFO] PMS.Infra.Watch.DS.Core.resourcesListWatchTask end."
+
+  where
+    errHdl :: E.SomeException -> IO ()
+    errHdl e = hPutStrLn stderr $ "[ERROR] PMS.Infra.Watch.DS.Core.resourcesListWatchTask exception occurred. " ++ show e
+
+    isTargetFile :: S.Event -> Bool
+    isTargetFile e =
+      let file = takeFileName (S.eventPath e)
+          -- ext  = takeExtension file
+      in file == (DM._RESOURCES_LIST_FILE) || (file == DM._RESOURCES_TPL_LIST_FILE)
+
+    onResourcesListUpdated :: S.Event -> IO ()
+#ifdef mingw32_HOST_OS
+    onResourcesListUpdated e@S.Modified{} = response $ S.eventPath e
+#else
+    onResourcesListUpdated e@S.CloseWrite{} = response $ S.eventPath e
+#endif
+    onResourcesListUpdated e = hPutStrLn stderr $ "[INFO] PMS.Infra.Watch.DS.Core.resourcesListWatchTask ignore event: " ++ show e
+
+    readResourcesList :: FilePath -> IO BL.ByteString
+    readResourcesList path = do
+      cont <- T.readFile path
+      return $ BL.fromStrict $ TE.encodeUtf8 cont
+
+    response :: String -> IO ()
+    response updateFile = do
+      hPutStrLn stderr $ "[INFO] PMS.Infra.Watch.DS.Core.resourcesListWatchTask.response called. " ++ updateFile
+
+      let resourcesFile = resourcesDir </> DM._RESOURCES_LIST_FILE
+      resources <- readResourcesList resourcesFile
+
+      let params = def {DM._resourcesMcpResourcesListChangedNotificationDataParams = DM.RawJsonByteString resources}
+          dat = def {DM._paramsMcpResourcesListChangedNotificationData = params}
+          res = DM.McpResourcesListChangedNotification dat
+
+      STM.atomically $ STM.writeTQueue notiQ res
