@@ -1,5 +1,9 @@
 # Revision history for pms-infra-watch
 
+## 0.0.5.0 -- 2025-07-20
+
+* Added proc tool.
+
 ## 0.0.4.0 -- 2025-07-13
 
 * Added serial tool.
