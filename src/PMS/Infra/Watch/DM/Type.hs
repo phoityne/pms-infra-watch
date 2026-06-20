@@ -8,6 +8,7 @@ import Control.Monad.Except
 import Control.Lens
 import Data.Default
 import Data.Aeson.TH
+import System.IO (hPutStrLn, stderr)
 import qualified System.FSNotify as F
 import qualified Control.Concurrent.STM as STM
 
@@ -23,7 +24,14 @@ makeLenses ''AppData
 
 defaultAppData :: IO AppData
 defaultAppData = do
-  mgr <- F.startManagerConf F.defaultConfig
+  -- Redirect fsnotify handler exceptions to stderr to prevent stdout corruption
+  -- of the MCP JSON-RPC stream. The default confOnHandlerException uses putStrLn
+  -- which writes to stdout.
+  let cfg = F.defaultConfig
+              { F.confOnHandlerException = \e ->
+                  hPutStrLn stderr ("fsnotify: handler threw exception: " <> show e)
+              }
+  mgr <- F.startManagerConf cfg
   mgrVar <- STM.newTMVarIO mgr
   return AppData {
            _watchManagerAppData = mgrVar

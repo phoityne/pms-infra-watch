@@ -1,5 +1,9 @@
 # Revision history for pms-infra-watch
 
+## 0.0.6.0 -- 2026-07-05
+
+* Reduced unnecessary output to stderr.
+
 ## 0.0.5.0 -- 2025-07-20
 
 * Added proc tool.

@@ -19,8 +19,7 @@ import Control.Monad.Except
 import System.FilePath
 import qualified Control.Exception.Safe as E
 import qualified System.FSNotify as S
-import qualified Data.Text.IO as T
-import qualified Data.Text.Encoding as TE
+
 import qualified Data.ByteString.Lazy as BL
 
 
@@ -170,9 +169,7 @@ toolsListWatchTask notiQ _ mgr toolsDir = flip E.catchAny errHdl $ do
     onToolsListUpdated e = hPutStrLn stderr $ "[INFO] PMS.Infra.Watch.DS.Core.toolsListWatchTask ignore event: " ++ show e
 
     readToolsList :: FilePath -> IO BL.ByteString
-    readToolsList path = do
-      cont <- T.readFile path
-      return $ BL.fromStrict $ TE.encodeUtf8 cont
+    readToolsList = BL.readFile
 
     response :: String -> IO ()
     response toolFile = do
@@ -231,9 +228,7 @@ promptsListWatchTask notiQ _ mgr promptsDir = flip E.catchAny errHdl $ do
     onPromptsListUpdated e = hPutStrLn stderr $ "[INFO] PMS.Infra.Watch.DS.Core.promptsListWatchTask ignore event: " ++ show e
 
     readPromptsList :: FilePath -> IO BL.ByteString
-    readPromptsList path = do
-      cont <- T.readFile path
-      return $ BL.fromStrict $ TE.encodeUtf8 cont
+    readPromptsList = BL.readFile
 
     response :: String -> IO ()
     response updateFile = do
@@ -295,9 +290,7 @@ resourcesListWatchTask notiQ _ mgr resourcesDir = flip E.catchAny errHdl $ do
     onResourcesListUpdated e = hPutStrLn stderr $ "[INFO] PMS.Infra.Watch.DS.Core.resourcesListWatchTask ignore event: " ++ show e
 
     readResourcesList :: FilePath -> IO BL.ByteString
-    readResourcesList path = do
-      cont <- T.readFile path
-      return $ BL.fromStrict $ TE.encodeUtf8 cont
+    readResourcesList = BL.readFile
 
     response :: String -> IO ()
     response updateFile = do
